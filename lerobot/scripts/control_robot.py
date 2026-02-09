@@ -121,10 +121,7 @@ python lerobot/scripts/control_robot.py \
 ```
 """
 
-'''
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
-(lerobot) jetson@robify:~/lerobot-piper$ python -m lerobot.scripts.control_robot --robot.type=piper --robot.inference_time=false --control.type=teleoperate
-'''
+
 
 import logging
 import time
