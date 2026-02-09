@@ -1,0 +1,1 @@
+In this code repository, I have completed the deployment application of the Piperx Dual-Robotic-Arm under the Lerobot framework. I'm extremely grateful to the bro Yuke LIU's open-source repository:https://github.com/lykycy123/lerobot-piper.git , it has brought me tremendous help. Otherwise, it would have been very difficult for me to complete this meaningful open-source work!!!
