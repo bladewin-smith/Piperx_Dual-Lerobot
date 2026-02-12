@@ -1,5 +1,5 @@
 """
-    Teleoperation Agilex Piper with a PS5 controller    
+    Teleoperation Agilex Piper with a Piper-X leader-arm or a PS5 controller    
 """
 
 import time
@@ -30,7 +30,6 @@ class PiperRobot:
         self.cameras = make_cameras_from_configs(self.config.cameras)
         
         # build piper motors
-        # self.piper_motorsl = make_motors_buses_from_configs(self.config.leader_arm)
         self.piper_motors_left_slave = make_motors_buses_from_configs(self.config.follower_arm_left)
         self.piper_motors_right_slave = make_motors_buses_from_configs(self.config.follower_arm_right)
         # self.arml = self.piper_motorsm['main']
@@ -44,9 +43,9 @@ class PiperRobot:
         # build gamepad teleop
         if not self.inference_time:
             self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=200.0)
-            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x02,0)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
             self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
-            self.teleop_right_leader.piper.GripperCtrl(0,100,0x02,0)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
             # self.teleop = SixAxisArmController()
         else:
             self.teleop_left_leader = None
@@ -167,9 +166,9 @@ class PiperRobot:
         
         if self.teleop_left_leader is None and self.inference_time:
             self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=50.0)
-            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x02,0)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
             self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
-            self.teleop_right_leader.piper.GripperCtrl(0,100,0x02,0)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
             # self.teleop = SixAxisArmController()
         #
         # read target pose state as 

@@ -2,7 +2,7 @@ In this code repository, I have completed the deployment application of the Pipe
 
 Before run the below commands to test teleoperate dual arm, please confirm that you have the Lerobot environment(conda) and install piper_sdk 
 
- cd Piperx_Dual-Lerobot
- export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+cd Piperx_Dual-Lerobot
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 python -m lerobot.scripts.control_robot --robot.type=piper --robot.inference_time=false --control.type=teleoperate
 

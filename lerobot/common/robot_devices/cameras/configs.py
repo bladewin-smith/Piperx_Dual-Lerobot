@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import draccus
 
-
+#CameraConfig 是一个抽象基类，用于管理不同相机配置的子类注册。
 @dataclass
 class CameraConfig(draccus.ChoiceRegistry, abc.ABC):
     @property
@@ -11,6 +11,11 @@ class CameraConfig(draccus.ChoiceRegistry, abc.ABC):
         return self.get_choice_name(self.__class__)
 
 
+'''
+OpenCVCameraConfig 和 IntelRealSenseCameraConfig 是两个具体的相机配置类，分别对应 OpenCV 相机和 Intel RealSense 相机。
+每个子类都用 @CameraConfig.register_subclass("name") 装饰器注册，方便通过字符串 "opencv" 或 "intelrealsense" 来识别和实例化对应配置。
+每个配置类都定义了相机参数，并在 __post_init__ 中做参数校验。
+'''
 @CameraConfig.register_subclass("opencv")
 @dataclass
 class OpenCVCameraConfig(CameraConfig):

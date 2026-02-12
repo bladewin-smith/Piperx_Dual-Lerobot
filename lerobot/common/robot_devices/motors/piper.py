@@ -51,8 +51,8 @@ class PiperMotorsBus:
             enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status)
             if(enable):
                 enable_flag = all(enable_list)
-                self.piper.EnableArm(7)
-                self.piper.GripperCtrl(0,1000,0x01, 0)
+                self.piper.EnableArm(7)  #官方SDK中的使能机械臂7个关节电机（Piper-X机械臂）的函数
+                self.piper.GripperCtrl(0,1000,0x01, 0)  #使能机械臂的夹爪
             else:
                 # move to safe disconnect position
                 enable_flag = any(enable_list)
@@ -109,12 +109,6 @@ class PiperMotorsBus:
         radians = [d * math.pi / 180.0 for d in degrees]
         # 机械臂单位转换因子
         factor = self.joint_factor  # 约57295.7795
-        # joint_0 = round(target_joint[0]*self.joint_factor)
-        # joint_1 = round(target_joint[1]*self.joint_factor)
-        # joint_2 = round(target_joint[2]*self.joint_factor)
-        # joint_3 = round(target_joint[3]*self.joint_factor)
-        # joint_4 = round(target_joint[4]*self.joint_factor)
-        # joint_5 = round(target_joint[5]*self.joint_factor)
         # gripper_range = round(target_joint[6]*1000*1000)
 
         # for i in range(6):

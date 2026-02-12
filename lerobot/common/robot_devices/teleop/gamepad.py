@@ -6,8 +6,6 @@ from ros2interface import *
 from piper_sdk import *
 import rclpy
 from rclpy.node import Node
-# from sensor_msgs.msg import JointState
-# from threading import Thread
 
 class PiperArm(Node):
     def __init__(self, can_port: str = "can0", publish_hz: float = 200.0):
@@ -31,20 +29,7 @@ class PiperArm(Node):
             log_file_path=None,
         )
         self.piper.ConnectPort()
-        self.piper.GripperCtrl(0,1000,0x02, 0)  #失能清除错误
-
-        # # 创建JointState发布者
-        # self.joint_pub = self.create_publisher(JointState, 'joint_states', 10)
-
-        # # 机械臂关节名称（根据机械臂实际命名修改）
-        # self.joint_names = [
-        #     'joint_1', 'joint_2', 'joint_3', 'joint_4', 'joint_5', 'joint_6'
-        # ]
-
-        # 启动发布线程
-        # self.running = True
-        # self.thread = Thread(target=self.publish_loop)
-        # self.thread.start()
+        self.piper.GripperCtrl(0,1000,0x01, 0)  #官方SDK中的使能机械臂夹爪的代码
 
     def read(self) -> Dict:
         """
@@ -74,43 +59,6 @@ class PiperArm(Node):
             "joint5": self.joints[5],
             "gripper": self.gripper
         }
-    # def get_action(self) -> Dict:
-    #     # 返回机械臂的当前状态
-    #     return {
-    #         'joint0': self.joints[0],
-    #         'joint1': self.joints[1],
-    #         'joint2': self.joints[2],
-    #         'joint3': self.joints[3],
-    #         'joint4': self.joints[4],
-    #         'joint5': self.joints[5],
-    #         'gripper': self.gripper
-    #     }
-
-    # def publish_loop(self):
-    #     rate = self.create_rate(self.publish_hz)
-    #     while rclpy.ok() and self.running:
-    #         try:
-    #             joint_msg = self.read()
-    #             joint_state = joint_msg.joint_state
-
-    #             msg = JointState()
-    #             msg.header.stamp = self.get_clock().now().to_msg()
-    #             msg.name = self.joint_names
-    #             # 读取关节角度，单位根据piper_sdk返回值调整（假设单位是弧度）
-    #             msg.position = [
-    #                 joint_state.joint_1,
-    #                 joint_state.joint_2,
-    #                 joint_state.joint_3,
-    #                 joint_state.joint_4,
-    #                 joint_state.joint_5,
-    #                 joint_state.joint_6,
-    #             ]
-    #             self.joint_pub.publish(msg)
-    #         except Exception as e:
-    #             self.get_logger().error(f"Failed to get or publish joint states: {e}")
-
-    #         rate.sleep()
-
     
     def reset(self):
         self.joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 6个关节
@@ -129,25 +77,9 @@ class PiperArm(Node):
         self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
 
     def stop(self):
-        # self.running = False
-        # self.thread.join()
         self.reset()
         self.piper = None
         
-
-# def main(args=None):
-#     rclpy.init(args=args)
-#     node = PiperRos2Publisher(can_port="can_left_master", publish_hz=50.0)
-#     try:
-#         rclpy.spin(node)
-#     except KeyboardInterrupt:
-#         pass
-#     finally:
-#         node.stop()
-#         node.destroy_node()
-#         rclpy.shutdown()
-
-
 # class SixAxisArmController:
 #     def __init__(self):
 #         # 初始化pygame和手柄
