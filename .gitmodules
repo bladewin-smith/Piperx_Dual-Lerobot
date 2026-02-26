@@ -1,0 +1,3 @@
+[submodule "agilex_arm_gravity_compensation"]
+	path = agilex_arm_gravity_compensation
+	url = https://github.com/kehuanjack/agilex-arm-gravity-compensation.git
