@@ -1,175 +1,291 @@
+"""
+    Teleoperation Agilex Piper with a Piper-X leader-arm or a PS5 controller    
+"""
+
 import time
-from typing import Dict
-from piper_sdk import *
-from lerobot.common.robot_devices.motors.configs import PiperMotorsBusConfig
-import math
+import torch
+import numpy as np
+from dataclasses import dataclass, field, replace
+import rclpy
 
-class PiperMotorsBus:
-
-    def __init__(self, 
-                 config: PiperMotorsBusConfig):
-        self.piper = C_PiperInterface_V2(config.can_name)
-        self.piper.ConnectPort()
-        self.motors = config.motors
-        self.init_joint_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # [6 joints + 1 gripper] * 0.0
-        self.safe_disable_position = [0.0, 0.0, 0.0, 0.0, 0.52, 0.0, 0.0]
-        self.pose_factor = 1000 # 单位 0.001mm
-        self.joint_factor = 57324.840764 # 1000*180/3.14， rad -> 度（单位0.001度）
-
-    @property
-    def motor_names(self) -> list[str]:
-        return list(self.motors.keys())
-
-    @property
-    def motor_models(self) -> list[str]:
-        return [model for _, model in self.motors.values()]
-
-    @property
-    def motor_indices(self) -> list[int]:
-        return [idx for idx, _ in self.motors.values()]
-
-
-    def connect(self, enable:bool) -> bool:
-        '''
-            使能机械臂并检测使能状态,尝试5s,如果使能超时则退出程序
-        '''
-        enable_flag = False
-        loop_flag = False
-        # 设置超时时间（秒）
-        timeout = 5
-        # 记录进入循环前的时间
-        start_time = time.time()
-        while not (loop_flag):
-            elapsed_time = time.time() - start_time
-            print(f"--------------------")
-            enable_list = []
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_1.foc_status.driver_enable_status)
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_2.foc_status.driver_enable_status)
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_3.foc_status.driver_enable_status)
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status)
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status)
-            enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status)
-            if(enable):
-                enable_flag = all(enable_list)
-                self.piper.EnableArm(7)  #官方SDK中的使能机械臂7个关节电机（Piper-X机械臂）的函数
-                self.piper.GripperCtrl(0,1000,0x01, 0)  #使能机械臂的夹爪
-            else:
-                # move to safe disconnect position
-                enable_flag = any(enable_list)
-                self.piper.DisableArm(7)
-                self.piper.GripperCtrl(0,1000,0x02, 0)
-            print(f"使能状态: {enable_flag}")
-            print(f"--------------------")
-            if(enable_flag == enable):
-                loop_flag = True
-                enable_flag = True
-            else: 
-                loop_flag = False
-                enable_flag = False
-            # 检查是否超过超时时间
-            if elapsed_time > timeout:
-                print(f"超时....")
-                enable_flag = False
-                loop_flag = True
-                break
-            time.sleep(0.5)
-        resp = enable_flag
-        print(f"Returning response: {resp}")
-        return resp
-    
-    def motor_names(self):
-        return
-
-    def set_calibration(self):
-        return
-    
-    def revert_calibration(self):
-        return
-
-    def apply_calibration(self):
-        """
-            移动到初始位置
-        """
-        self.write(target_joint=self.init_joint_position)
-
-    def write(self, target_joint:list):
-        """
-            Joint control
-            - target joint: in radians
-                joint_1 (float): 关节1角度 (-92000~92000) / 57324.840764
-                joint_2 (float): 关节2角度 -1300 ~ 90000 / 57324.840764
-                joint_3 (float): 关节3角度 2400 ~ -80000 / 57324.840764
-                joint_4 (float): 关节4角度 -90000~90000 / 57324.840764
-                joint_5 (float): 关节5角度 19000~-77000 / 57324.840764
-                joint_6 (float): 关节6角度 -90000~90000 / 57324.840764
-                gripper_range: 夹爪角度 0~0.08
-        """
-        # 缩小 1000 倍
-        degrees = [x / 1000.0 for x in target_joint[:6]]  
-        radians = [d * math.pi / 180.0 for d in degrees]
-        # 机械臂单位转换因子
-        factor = self.joint_factor  # 约57295.7795
-        # gripper_range = round(target_joint[6]*1000*1000)
-
-        # for i in range(6):
-        #     print(f"{target_joint[i]}\n")
-        # print("ready")
-        joint_0 = int(round(radians[0] * factor))
-        joint_1 = int(round(radians[1] * factor))
-        joint_2 = int(round(radians[2] * factor))
-        joint_3 = int(round(radians[3] * factor))
-        joint_4 = int(round(radians[4] * factor))
-        joint_5 = int(round(radians[5] * factor))
-
-        gripper_range = int(round(target_joint[6]))
-
-        self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00) # joint control
-        self.piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
-    
-    # range = 0
-    # count = 0
-    # while True:
-    #     print(piper.GetArmGripperMsgs())
-    #     count  = count + 1
-    #     if(count == 0):
-    #         print("1-----------")
-    #         range = 0
-    #     elif(count == 300):
-    #         print("2-----------")
-    #         range = 0.05 * 1000 * 1000 # 0.05m = 50mm
-    #     elif(count == 600):
-    #         print("3-----------")
-    #         range = 0
-    #         count = 0
-    #     range = round(range)
-    #     piper.GripperCtrl(abs(range), 1000, 0x01, 0)
-    #     time.sleep(0.005)
-        # print("finished")
-
-    def read(self) -> Dict:
-        """
-            - 机械臂关节消息,单位0.001度
-            - 机械臂夹爪消息
-        """
-        joint_msg = self.piper.GetArmJointMsgs()
-        joint_state = joint_msg.joint_state
-
-        gripper_msg = self.piper.GetArmGripperMsgs()
-        gripper_state = gripper_msg.gripper_state
+from lerobot.common.robot_devices.teleop.gamepad import  PiperArm #SixAxisArmController,
+from lerobot.common.robot_devices.motors.utils import get_motor_names, make_motors_buses_from_configs
+from lerobot.common.robot_devices.cameras.utils import make_cameras_from_configs
+from lerobot.common.robot_devices.utils import RobotDeviceAlreadyConnectedError, RobotDeviceNotConnectedError
+from lerobot.common.robot_devices.robots.configs import PiperRobotConfig
+#以下的代码主要用于控制主臂
+class PiperRobot:
+    def __init__(self, config: PiperRobotConfig | None = None, **kwargs):
+        if config is None:
+            config = PiperRobotConfig()
+        # Overwrite config arguments using kwargs
+        self.config = replace(config, **kwargs)
+        self.robot_type = self.config.type
+        self.inference_time = self.config.inference_time # if it is inference time
         
+        # 初始化rclpy
+        if not rclpy.ok():
+            rclpy.init()
+        # build cameras
+        self.cameras = make_cameras_from_configs(self.config.cameras)
+        
+        # build piper motors
+        self.piper_motors_left_slave = make_motors_buses_from_configs(self.config.follower_arm_left)
+        self.piper_motors_right_slave = make_motors_buses_from_configs(self.config.follower_arm_right)
+        # self.arml = self.piper_motorsm['main']
+        self.arm_left_slave = self.piper_motors_left_slave['slave']
+        self.arm_right_slave = self.piper_motors_right_slave['slave']
+        self.can_port_left_leader = self.config.leader_arm_left["main"].can_name
+        self.can_port_right_leader = self.config.leader_arm_right["main"].can_name
+        self.can_port_left_slave = self.config.follower_arm_left["slave"].can_name
+        self.can_port_right_slave = self.config.follower_arm_right["slave"].can_name
+        
+        # build gamepad teleop
+        if not self.inference_time:
+            self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=200.0)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
+            time.sleep(2)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+            self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
+            time.sleep(2)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+            # self.teleop = SixAxisArmController()
+        else:
+            self.teleop_left_leader = None
+            self.teleop_right_leader = None
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+        
+        self.logs = {}
+        self.is_connected = False
+
+    @property
+    def camera_features(self) -> dict:
+        cam_ft = {}
+        for cam_key, cam in self.cameras.items():
+            key = f"observation.images.{cam_key}"
+            cam_ft[key] = {
+                "shape": (cam.height, cam.width, cam.channels),
+                "names": ["height", "width", "channels"],
+                "info": None,   
+            }
+        return cam_ft
+
+    
+    @property
+    def motor_features(self) -> dict:
+        action_names_left_slave = get_motor_names(self.piper_motors_left_slave)
+        state_names_left_slave = get_motor_names(self.piper_motors_left_slave)
+        action_names_right_slave = get_motor_names(self.piper_motors_right_slave)
+        state_names_right_slave = get_motor_names(self.piper_motors_right_slave)
         return {
-            "joint_1": joint_state.joint_1,
-            "joint_2": joint_state.joint_2,
-            "joint_3": joint_state.joint_3,
-            "joint_4": joint_state.joint_4,
-            "joint_5": joint_state.joint_5,
-            "joint_6": joint_state.joint_6,
-            "gripper": gripper_state.grippers_angle
+            "action": {
+                "dtype": "float32",
+                "shape_left": (len(action_names_left_slave),),
+                "names_left": action_names_left_slave,
+                "shape_right": (len(action_names_right_slave),),
+                "names_right": action_names_right_slave,
+            },
+            "observation.state": {
+                "dtype": "float32",
+                "shape_left": (len(state_names_left_slave),),
+                "names_left": state_names_left_slave,
+                "shape_right": (len(state_names_right_slave),),
+                "names_right": state_names_right_slave,
+            },
         }
     
-    def safe_disconnect(self):
-        """ 
-            Move to safe disconnect position
-        """
-        self.write(target_joint=self.safe_disable_position)
+    @property
+    def has_camera(self):
+        return len(self.cameras) > 0
+
+    @property
+    def num_cameras(self):
+        return len(self.cameras)
+
+
+    def connect(self) -> None:
+        """Connect piper and cameras"""
+        if self.is_connected:
+            raise RobotDeviceAlreadyConnectedError(
+                "Piper is already connected. Do not run `robot.connect()` twice."
+            )
+        
+        # connect piper
+        self.arm_left_slave.connect(enable=True)
+        self.arm_right_slave.connect(enable=True)
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+        print("piper conneted")
+
+        # connect cameras
+        for name in self.cameras:
+            self.cameras[name].connect()
+            self.is_connected = self.is_connected and self.cameras[name].is_connected
+            print(f"camera {name} conneted")
+        
+        print("All connected")
+        self.is_connected = True
+        
+        self.run_calibration()
+
+
+    def disconnect(self) -> None:
+        """move to home position, disenable piper and cameras"""
+        # move piper to home position, disable
+        if not self.inference_time:
+            self.teleop_left_leader.stop()
+            self.teleop_right_leader.stop()
+
+        # disconnect piper
+        self.arm_left_slave.safe_disconnect()
+        self.arm_right_slave.safe_disconnect()
+        print("piper disable after 5 seconds")
+        time.sleep(5)
+        self.arm_left_slave.connect(enable=False)
+        self.arm_right_slave.connect(enable=False)
+
+        # disconnect cameras
+        if len(self.cameras) > 0:
+            for cam in self.cameras.values():
+                cam.disconnect()
+
+        self.is_connected = False
+
+
+    def run_calibration(self):
+        """move piper to the home position"""
+        if not self.is_connected:
+            raise ConnectionError()
+        
+        self.arm_left_slave.apply_calibration()
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+        if not self.inference_time:
+            self.teleop_left_leader.reset()
+            self.teleop_right_leader.reset()
+
+
+
+    def teleop_step(
+        self, record_data=False
+    ) -> None | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:  #定义遥操机械臂实现步骤的方法
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+        if not self.is_connected:
+            raise ConnectionError()
+        
+        if self.teleop_left_leader is None and self.inference_time:
+            self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=50.0)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+            self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+            # self.teleop = SixAxisArmController()
+        #
+        # read target pose state as 
+        before_read_t = time.perf_counter()
+        state_left = self.arm_left_slave.read() # read current joint position from robot
+        action_left = self.teleop_left_leader.read()
+        state_right = self.arm_right_slave.read() # read current joint position from robot
+        action_right = self.teleop_right_leader.read()
+        # action = self.teleop.get_action() # target joint position from gamepad
+        self.logs["read_pos_dt_s"] = time.perf_counter() - before_read_t
+
+        # do action
+        before_write_t = time.perf_counter()
+        target_joints_left = list(action_left.values())
+        self.arm_left_slave.write(target_joints_left)
+        target_joints_right = list(action_right.values())
+        self.arm_right_slave.write(target_joints_right)
+        self.logs["write_pos_dt_s"] = time.perf_counter() - before_write_t
+        self.teleop_left_leader.start_gravity_compensation()
+        self.teleop_right_leader.start_gravity_compensation()
+        if not record_data:
+            return
+        
+        state_left = torch.as_tensor(list(state_left.values()), dtype=torch.float32)
+        action_left = torch.as_tensor(list(action_left.values()), dtype=torch.float32)
+        state_right = torch.as_tensor(list(state_right.values()), dtype=torch.float32)
+        action_right = torch.as_tensor(list(action_right.values()), dtype=torch.float32)
+
+        # Capture images from cameras
+        images = {}
+        for name in self.cameras:
+            before_camread_t = time.perf_counter()
+            images[name] = self.cameras[name].async_read()
+            images[name] = torch.from_numpy(np.asarray(images[name]))
+            self.logs[f"read_camera_{name}_dt_s"] = self.cameras[name].logs["delta_timestamp_s"]
+            self.logs[f"async_read_camera_{name}_dt_s"] = time.perf_counter() - before_camread_t
+
+        # Populate output dictionnaries
+        obs_dict, action_dict = {}, {}
+        obs_dict["observation.state.left"] = state_left
+        obs_dict["observation.state.right"] = state_right
+
+        action_dict["action.left"] = action_left
+        action_dict["action.right"] = action_right
+
+        for name in self.cameras:
+            obs_dict[f"observation.images.{name}"] = images[name]
+
+        return obs_dict, action_dict
+
+
+
+    def send_action(self, action: torch.Tensor) -> torch.Tensor:
+        """Write the predicted actions from policy to the motors"""
+        if not self.is_connected:
+            raise RobotDeviceNotConnectedError(
+                "Piper is not connected. You need to run `robot.connect()`."
+            )
+
+        # send to motors, torch to list
+        target_joints = action.tolist()
+        self.arms.write(target_joints)
+
+        return action
+
+
+
+    def capture_observation(self) -> dict:
+        """capture current images and joint positions"""
+        if not self.is_connected:
+            raise RobotDeviceNotConnectedError(
+                "Piper is not connected. You need to run `robot.connect()`."
+            )
+        
+        # read current joint positions
+        before_read_t = time.perf_counter()
+        state = self.arms.read()  # 6 joints + 1 gripper
+        self.logs["read_pos_dt_s"] = time.perf_counter() - before_read_t
+
+        state = torch.as_tensor(list(state.values()), dtype=torch.float32)
+
+        # read images from cameras
+        images = {}
+        for name in self.cameras:
+            before_camread_t = time.perf_counter()
+            images[name] = self.cameras[name].async_read()
+            images[name] = torch.from_numpy(images[name])
+            self.logs[f"read_camera_{name}_dt_s"] = self.cameras[name].logs["delta_timestamp_s"]
+            self.logs[f"async_read_camera_{name}_dt_s"] = time.perf_counter() - before_camread_t
+
+        # Populate output dictionnaries and format to pytorch
+        obs_dict = {}
+        obs_dict["observation.state"] = state
+        for name in self.cameras:
+            obs_dict[f"observation.images.{name}"] = images[name]
+        return obs_dict
+    
+    def teleop_safety_stop(self):
+        """ move to home position after record one episode """
+        self.run_calibration()
+
+    
+    def __del__(self):
+        if self.is_connected:
+            self.disconnect()
+            if not self.inference_time:
+                self.teleop.stop()
+                
