@@ -6,15 +6,54 @@ from ros2interface import *
 from piper_sdk import *
 import rclpy
 from rclpy.node import Node
+from pyAgxArm import create_agx_arm_config, AgxArmFactory
+import numpy as np
+from agilex_arm_gravity_compensation.agx_pinocchio import AgxPinocchio
+from scipy.spatial.transform import Rotation as R
+#export PYTHONPATH=/home/jetson/lerobot-piper:$PYTHONPATH
+
 
 class PiperArm(Node):
     def __init__(self, can_port: str = "can0", publish_hz: float = 200.0):
-        # super().__init__('piper_joint_publisher')
+        super().__init__('piper_joint_publisher')
         self.can_port = can_port
         self.publish_hz = publish_hz
-        self.joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 6个关节
+        self.joints = [0.0] * 6  # 6个关节
         self.gripper = 0.0  # 夹爪状态
-        self.joint_factor = 57324.840764 # 1000*180/3.14， rad -> 度（单位0.001度）
+        self.joint_factor = 57324.840764  # 1000*180/3.14， rad -> 度（单位0.001度）
+
+        # 机械臂URDF路径，根据实际情况修改
+        self.urdf_path = "/home/jetson/lerobot-piper/agilex_arm_gravity_compensation/piper_x_description/urdf/piper_x_description.urdf"
+
+        # 初始化逆运动学求解器（用于重力补偿计算）
+        self.pin = AgxPinocchio(self.urdf_path)
+
+        # 控制频率
+        self.control_frequency = publish_hz
+
+        # 关节力矩修正比例（根据实际情况调整）
+        self.rx_ratio = [0.25, 0.25, 0.25, 1.0, 1.0, 1.0]
+        self.tx_ratio = [1.0] * 6  # 1.8-3及以上版本
+
+        # 初始化机械臂接口
+        self.cfg = create_agx_arm_config(robot="piper_x", comm="can", channel=self.can_port, interface="socketcan")
+        self.robot = AgxArmFactory.create_arm(self.cfg)
+        self.robot.connect()
+
+        # 等待机械臂使能
+        while not self.robot.enable():
+            time.sleep(0.01)
+        print("机械臂使能成功")
+
+        # 获取当前关节角度，确保机械臂状态可用
+        while self.robot.get_joint_angles() is None:
+            joint_angles = np.array(self.robot.get_joint_angles().msg)
+            time.sleep(0.01)
+            print(joint_angles)
+
+        # 计算世界坐标系到基座坐标系的旋转矩阵
+        roll, pitch, yaw = 0, 0, 0  # 单位：deg
+        self.R_world_base = R.from_euler('xyz', [roll, pitch, yaw], degrees=True).as_matrix()
 
         # 初始化piper接口
         self.piper = C_PiperInterface(
@@ -29,18 +68,76 @@ class PiperArm(Node):
             log_file_path=None,
         )
         self.piper.ConnectPort()
-        self.piper.GripperCtrl(0,1000,0x01, 0)  #官方SDK中的使能机械臂夹爪的代码
+        self.piper.GripperCtrl(0, 1000, 0x01, 0)  # 使能机械臂夹爪
         time.sleep(2)
-        self.piper.GripperCtrl(0,1000,0x00, 0) 
+        self.piper.GripperCtrl(0, 1000, 0x00, 0)
+
+        # 重力补偿线程控制变量
+        self._gravity_thread = None
+        self._gravity_thread_running = False
+
+    def _gravity_compensation_loop(self):
+        print("开始重力补偿控制循环...")
+        try:
+            while self._gravity_thread_running:
+                start_time = time.time()
+
+                joint_angles = np.array(self.robot.get_joint_angles().msg)
+
+                joint_velocities = np.zeros(self.robot.joint_nums)
+                joint_torques = np.zeros(self.robot.joint_nums)
+                for i in range(1, self.robot.joint_nums + 1):
+                    ms = self.robot.get_motor_states(i)
+                    if ms is not None:
+                        joint_velocities[i - 1] = ms.msg.motor_speed
+                        joint_torques[i - 1] = ms.msg.torque
+
+                gravity_torque = self.pin.gravity_compensation(joint_angles, joint_velocities, self.R_world_base)
+
+                try:
+                    for joint_id in range(1, self.robot.joint_nums + 1):
+                        joint_idx = joint_id - 1
+                        actual_torque = self.tx_ratio[joint_idx] * gravity_torque[joint_idx]
+                        self.robot.move_mit(joint_id, 0, 0, 0, 0, actual_torque)
+
+                        joint_torques[joint_idx] /= self.rx_ratio[joint_idx]
+
+                    print(f"目标力矩 - 反馈力矩: {np.round(gravity_torque - joint_torques, 3).tolist()}")
+
+                except Exception as e:
+                    print(f"应用重力补偿失败: {e}")
+
+                t = 1.0 / self.control_frequency
+                elapsed_time = time.time() - start_time
+                if elapsed_time < t:
+                    time.sleep(t - elapsed_time)
+                else:
+                    print(f"警告：控制循环超时 {elapsed_time:.3f}s > {t:.3f}s")
+
+        except Exception as e:
+            print(f"重力补偿线程异常退出: {e}")
+
+    def start_gravity_compensation(self):
+        if self._gravity_thread is None or not self._gravity_thread.is_alive():
+            self._gravity_thread_running = True
+            self._gravity_thread = threading.Thread(target=self._gravity_compensation_loop, daemon=True)
+            self._gravity_thread.start()
+            print("重力补偿线程已启动")
+
+    def stop_gravity_compensation(self):
+        self._gravity_thread_running = False
+        if self._gravity_thread is not None:
+            self._gravity_thread.join()
+            print("重力补偿线程已停止")
+            self._gravity_thread = None
 
     def read(self) -> Dict:
         """
-            - 机械臂关节消息,单位0.001度
-            - 机械臂夹爪消息
+        获取机械臂当前关节和夹爪状态，单位0.001度
         """
         joint_msg = self.piper.GetArmJointMsgs()
         joint_state = joint_msg.joint_state
-        
+
         self.joints[0] = joint_state.joint_1
         self.joints[1] = joint_state.joint_2
         self.joints[2] = joint_state.joint_3
@@ -51,7 +148,7 @@ class PiperArm(Node):
         gripper_msg = self.piper.GetArmGripperMsgs()
         gripper_state = gripper_msg.gripper_state
         self.gripper = gripper_state.grippers_angle
-        
+
         return {
             "joint0": self.joints[0],
             "joint1": self.joints[1],
@@ -61,26 +158,44 @@ class PiperArm(Node):
             "joint5": self.joints[5],
             "gripper": self.gripper
         }
-    
+
     def reset(self):
-        self.joints = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 6个关节
-        self.gripper = 0.0  # 夹爪状态
+        self.joints = [0.0] * 6
+        self.gripper = 0.0
 
-        joint_0 = round(self.joints[0]*self.joint_factor)
-        joint_1 = round(self.joints[1]*self.joint_factor)
-        joint_2 = round(self.joints[2]*self.joint_factor)
-        joint_3 = round(self.joints[3]*self.joint_factor)
-        joint_4 = round(self.joints[4]*self.joint_factor)
-        joint_5 = round(self.joints[5]*self.joint_factor)
-        gripper_range = round(self.gripper*1000*1000)
+        joint_0 = round(self.joints[0] * self.joint_factor)
+        joint_1 = round(self.joints[1] * self.joint_factor)
+        joint_2 = round(self.joints[2] * self.joint_factor)
+        joint_3 = round(self.joints[3] * self.joint_factor)
+        joint_4 = round(self.joints[4] * self.joint_factor)
+        joint_5 = round(self.joints[5] * self.joint_factor)
+        gripper_range = round(self.gripper * 1000 * 1000)
 
-        self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00) # joint control
+        self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)  # joint control
         self.piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
+        self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0)  # 单位 0.001°
 
     def stop(self):
+        self.stop_gravity_compensation()
         self.reset()
         self.piper = None
+
+
+if __name__ == "__main__":
+    rclpy.init()
+    arm = PiperArm(can_port="can_left_master", publish_hz=200.0)
+    arm.start_gravity_compensation()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("用户中断，停止程序")
+    finally:
+        arm.stop()
+        rclpy.shutdown()
+
+
         
 # class SixAxisArmController:
 #     def __init__(self):

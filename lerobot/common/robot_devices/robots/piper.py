@@ -13,7 +13,7 @@ from lerobot.common.robot_devices.motors.utils import get_motor_names, make_moto
 from lerobot.common.robot_devices.cameras.utils import make_cameras_from_configs
 from lerobot.common.robot_devices.utils import RobotDeviceAlreadyConnectedError, RobotDeviceNotConnectedError
 from lerobot.common.robot_devices.robots.configs import PiperRobotConfig
-
+#以下的代码主要用于控制主臂
 class PiperRobot:
     def __init__(self, config: PiperRobotConfig | None = None, **kwargs):
         if config is None:
@@ -56,6 +56,7 @@ class PiperRobot:
             self.teleop_right_leader = None
         self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
         self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
+        
         self.logs = {}
         self.is_connected = False
 
@@ -177,12 +178,8 @@ class PiperRobot:
         
         if self.teleop_left_leader is None and self.inference_time:
             self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=50.0)
-            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
-            time.sleep(1)
             self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
             self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
-            self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
-            time.sleep(1)
             self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
             # self.teleop = SixAxisArmController()
         #
@@ -202,7 +199,8 @@ class PiperRobot:
         target_joints_right = list(action_right.values())
         self.arm_right_slave.write(target_joints_right)
         self.logs["write_pos_dt_s"] = time.perf_counter() - before_write_t
-
+        self.teleop_left_leader.start_gravity_compensation()
+        self.teleop_right_leader.start_gravity_compensation()
         if not record_data:
             return
         
