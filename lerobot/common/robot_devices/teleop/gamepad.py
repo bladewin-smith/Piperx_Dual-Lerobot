@@ -30,6 +30,8 @@ class PiperArm(Node):
         )
         self.piper.ConnectPort()
         self.piper.GripperCtrl(0,1000,0x01, 0)  #官方SDK中的使能机械臂夹爪的代码
+        time.sleep(2)
+        self.piper.GripperCtrl(0,1000,0x00, 0) 
 
     def read(self) -> Dict:
         """

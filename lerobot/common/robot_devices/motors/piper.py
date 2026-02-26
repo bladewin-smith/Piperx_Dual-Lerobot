@@ -121,7 +121,7 @@ class PiperMotorsBus:
         joint_4 = int(round(radians[4] * factor))
         joint_5 = int(round(radians[5] * factor))
 
-        gripper_range = int(round(target_joint[6])*1000)
+        gripper_range = int(round(target_joint[6]))
 
         self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00) # joint control
         self.piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)

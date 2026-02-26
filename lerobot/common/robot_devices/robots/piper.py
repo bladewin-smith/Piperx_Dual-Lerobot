@@ -44,13 +44,18 @@ class PiperRobot:
         if not self.inference_time:
             self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=200.0)
             self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
+            time.sleep(2)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
             self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
             self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
+            time.sleep(2)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
             # self.teleop = SixAxisArmController()
         else:
             self.teleop_left_leader = None
             self.teleop_right_leader = None
-        
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
         self.logs = {}
         self.is_connected = False
 
@@ -109,6 +114,8 @@ class PiperRobot:
         # connect piper
         self.arm_left_slave.connect(enable=True)
         self.arm_right_slave.connect(enable=True)
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
         print("piper conneted")
 
         # connect cameras
@@ -152,6 +159,8 @@ class PiperRobot:
             raise ConnectionError()
         
         self.arm_left_slave.apply_calibration()
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
         if not self.inference_time:
             self.teleop_left_leader.reset()
             self.teleop_right_leader.reset()
@@ -161,14 +170,20 @@ class PiperRobot:
     def teleop_step(
         self, record_data=False
     ) -> None | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:  #定义遥操机械臂实现步骤的方法
+        self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
+        self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
         if not self.is_connected:
             raise ConnectionError()
         
         if self.teleop_left_leader is None and self.inference_time:
             self.teleop_left_leader = PiperArm(can_port=self.can_port_left_leader, publish_hz=50.0)
             self.teleop_left_leader.piper.GripperCtrl(0,1000,0x01,0)
+            time.sleep(1)
+            self.teleop_left_leader.piper.GripperCtrl(0,1000,0x00,0)
             self.teleop_right_leader = PiperArm(can_port=self.can_port_right_leader, publish_hz=200.0)
             self.teleop_right_leader.piper.GripperCtrl(0,100,0x01,0)
+            time.sleep(1)
+            self.teleop_right_leader.piper.GripperCtrl(0,100,0x00,0)
             # self.teleop = SixAxisArmController()
         #
         # read target pose state as 
